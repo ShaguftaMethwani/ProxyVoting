@@ -1,0 +1,237 @@
+pragma solidity ^0.4.2;
+/* The token is used as a voting shares */
+contract token { mapping (address => uint256) public balanceOf;
+function bal(address _addr, uint256 _value) public { balanceOf[_addr]= _value;}}
+ 
+contract Association{
+
+    mapping (address => uint) public memberId;
+    Member[] public members;
+    address public Management;
+    mapping (address => bool) public isManager;
+    token public sharesTokenAddress;
+    
+    
+    struct Member{
+        address member;
+        bool isFrozen;
+        string name;
+        uint memberSince;
+    }
+    
+} 
+
+
+/* define 'owned' */
+contract owned {
+    address public owner;
+    event Transfer(address indexed from, address indexed to);
+    function owned() {
+        owner = msg.sender;
+    }
+
+    modifier onlyOwner {
+        if (msg.sender != owner) throw;
+        _;
+    }
+
+    function transferOwnership(address newOwner) onlyOwner {
+        address temp = owner;
+        owner = newOwner;
+        Transfer(temp, owner);
+    }
+}
+
+
+/* The democracy contract itself */
+contract Ballot is owned {
+
+    /* Contract Variables and events */
+    Association public assocAddress;
+    token public sharesTokenAddress;
+    
+    uint public minimumQuorum;
+    uint public debatingPeriodInMinutes;
+    bool public startVoting;
+    uint public votingDeadline;
+    bool public executed;
+    //mapping (address => uint256) public balan;
+    Proposal[] public proposals;
+    uint public numProposals;
+    uint proposalID;
+    mapping (uint => uint) public V;
+    
+     event ChangeOfRules(uint minimumQuorum, uint debatingPeriodInMinutes, address sharesTokenAddress);
+      event ProposalAdded(uint proposalID, string description);
+      event Voted(uint proposalID, uint256 position, address voter);
+      event ProposalTallied(uint proposalID, bool quorum, bool active);
+
+    
+    struct Proposal {
+        string description;
+        bool proposalPassed;
+        uint numberOfVotes;
+        uint numberofUniqueVotes;
+        uint yesShares;
+        uint noShares;
+        uint noStand;
+        uint abstain;
+        bool quorumStatus;
+        Vote[] votes;
+        mapping (address => uint) voted;
+    }
+
+    struct Vote {
+        uint256 inSupport;
+        address voter;
+    }
+
+     
+     
+     modifier onlyMembers {
+        if (sharesTokenAddress.balanceOf(msg.sender) == 0 && msg.sender != owner ) throw;
+        _;
+    }
+    
+     modifier onlyShareHolders {
+         if (sharesTokenAddress.balanceOf(msg.sender) == 0) throw;
+        _;
+     }
+    
+
+    /* First time setup */
+    function Ballot(Association _assocAddr, token sharesAddress,uint minimumSharesToPassAVote, uint minutesForDebate) payable {
+        changeVotingRules(_assocAddr,sharesAddress,minimumSharesToPassAVote, minutesForDebate);
+        
+    }
+    function changeVotingRules(Association _addr, token sharesAddress,uint minimumSharesToPassAVote, uint minutesForDebate) onlyOwner {
+        assocAddress = Association(_addr);
+        sharesTokenAddress = token (sharesAddress);
+        if (minimumSharesToPassAVote == 0 ) minimumSharesToPassAVote = 1;
+        minimumQuorum = minimumSharesToPassAVote;
+        debatingPeriodInMinutes = minutesForDebate;
+        proposals.length++;
+        ChangeOfRules(minimumQuorum, debatingPeriodInMinutes, sharesTokenAddress);
+       // checkismanager();
+    }
+    
+     /* Function to create a new proposal */
+      function newProposal(string ProposalDescription) onlyOwner
+    {
+       if(assocAddress.sharesTokenAddress() != sharesTokenAddress || owner != assocAddress.Management()) throw;
+       if(startVoting)
+       throw;
+       
+        proposalID = proposals.length++;
+        Proposal p = proposals[proposalID];
+        p.description = ProposalDescription;
+        p.proposalPassed = false;
+        p.numberOfVotes = 0;
+        ProposalAdded(proposalID, ProposalDescription);
+        numProposals = proposalID;
+        p.votes.length++;
+    }
+    
+    function startVote() onlyOwner{
+        if(assocAddress.sharesTokenAddress() != sharesTokenAddress || owner != assocAddress.Management()) throw;
+        startVoting = true;
+        votingDeadline = now + debatingPeriodInMinutes * 1 minutes;
+    }
+    
+    function vote(uint256[] Myvote) onlyShareHolders
+    {
+       if(assocAddress.sharesTokenAddress() != sharesTokenAddress || owner != assocAddress.Management()) throw;
+       if(!startVoting) throw;
+       if(now > votingDeadline) throw;
+       
+       for(uint i = 0; i<Myvote.length;i++){
+           uint VoteID;
+            Proposal p = proposals[i+1];
+            if(p.voted[msg.sender] == 0)
+            {
+                VoteID = p.votes.length++;
+                p.voted[msg.sender] = VoteID;
+                p.votes[VoteID] = Vote({inSupport: Myvote[i], voter: msg.sender});
+                p.numberofUniqueVotes = VoteID;
+                p.numberOfVotes++;
+                V[i+1] = Myvote[i];
+                Voted(i+1, Myvote[i], msg.sender);
+            }
+            else
+            {
+                VoteID = p.voted[msg.sender];
+                p.votes[VoteID]= Vote({inSupport: Myvote[i], voter: msg.sender});
+                p.numberOfVotes++; 
+                Voted(i+1, Myvote[i], msg.sender);
+                V[i+1] = Myvote[i];
+            }
+       }
+      
+    }
+    
+    function execute() onlyOwner {
+         if(assocAddress.sharesTokenAddress() != sharesTokenAddress || owner != assocAddress.Management()) throw;
+     
+        if (now < votingDeadline ||  executed || !startVoting )throw;
+
+        /* tally the votes */
+        uint quorum = 0;
+         for(uint j=0; j< proposals.length-1;j++){
+            
+            Proposal p = proposals[j+1];
+        
+        for (uint i = 0; i <  p.votes.length-1; ++i) {
+            Vote v = p.votes[i+1];
+            uint256 voteWeight = sharesTokenAddress.balanceOf(v.voter);
+            quorum += voteWeight;
+            if (v.inSupport == 1) {
+                p.yesShares += voteWeight;
+            } else if(v.inSupport == 2){
+                p.noShares += voteWeight;
+            } else if(v.inSupport == 3){
+                p.noStand += voteWeight;
+            } else if(v.inSupport == 0){
+                p.noStand += voteWeight;
+                quorum -= voteWeight;
+            }
+
+        /* execute result */
+       if (quorum <= minimumQuorum) {
+            
+           p.quorumStatus = false;
+            
+        } else if (p.yesShares > p.noShares ) {
+            
+            p.quorumStatus=true;
+            p.proposalPassed = true;
+        } else {
+            p.quorumStatus=true;
+            p.proposalPassed = false;
+        }
+        // Fire Events
+        ProposalTallied(j+1, p.quorumStatus, p.proposalPassed);
+    }
+    
+}
+   
+executed = true;        
+    
+   /* function update(address _addr) onlyOwner{
+        if(assocAddress.sharesTokenAddress() != sharesTokenAddress || owner != assocAddress.Management())
+        throw;
+        
+        balan[_addr] = sharesTokenAddress.balanceOf(_addr);
+    }*/
+    
+    
+
+        
+}
+
+function trial(){
+    newProposal("Salary Increase");
+    newProposal("Increase Technology Spend");
+    startVote();
+    
+}
+}

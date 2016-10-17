@@ -1,0 +1,143 @@
+pragma solidity ^0.4.2;
+/* The token is used as a voting shares */
+contract token { mapping (address => uint256) public balanceOf;
+ function bal(address _addr, uint256 _value) public { balanceOf[_addr]= _value;}}
+
+
+/* define 'owned' */
+contract owned {
+    address public owner;
+    event Transfer(address indexed from, address indexed to);
+    function owned() {
+        owner = msg.sender;
+    }
+
+    modifier onlyOwner {
+        if (msg.sender != owner) throw;
+        _;
+    }
+
+    function transferOwnership(address newOwner) onlyOwner {
+        address temp = owner;
+        owner = newOwner;
+        Transfer(temp, owner);
+    }
+}
+
+
+/* The democracy contract itself */
+contract Association is owned {
+
+    /* Contract Variables and events */
+    token public sharesTokenAddress;
+    mapping (address => uint) public memberId;
+    mapping (address => bool) public isManager;
+    Member[] public members;
+    address public Management;
+    
+    event MembershipChanged(address targetMember, bool Frozen, string Membername, uint256 Shares);
+    event ManagementChanged(address oldManager, address newManager);
+    event TransferMembership(address from, address To, string Buyer, uint256 TransferredSecurities);
+    //For Simplicity keeping frozen now with change membership only.
+    
+    struct Member{
+        address member;
+        bool isFrozen;
+        string name;
+        uint memberSince;
+    }
+    
+
+    /* First time setup */
+    function Association(token sharesAddress, address Manage) payable {
+        changeVotingRules(sharesAddress, Manage);
+        
+        
+    }
+
+    /*change rules*/
+    function changeVotingRules(token sharesAddress, address Manage) onlyOwner {
+        sharesTokenAddress = token(sharesAddress);
+        Management = Manage;
+        isManager[Manage] = true;
+    }
+    function changeManagement(address Manage) onlyOwner{
+        address temp = Management;
+        Management = Manage;
+        ManagementChanged(temp,Manage);
+    }
+    
+    
+      
+    
+    
+    function changeMembership(address targetMember, bool Frozen, string Membername, uint256 Shares) onlyOwner {
+        if(targetMember == Management || targetMember == owner){
+            throw;
+        }
+        uint id;
+        if (memberId[targetMember] == 0) {
+            if(members.length == 0)
+            {
+           memberId[targetMember] = 1;
+           id = 1;
+           members.length++;
+           members.length++;
+            }
+            else
+            {
+                memberId[targetMember] = members.length;
+                id = members.length++;
+            }
+            
+           members[id] = Member({member: targetMember, isFrozen: Frozen, memberSince: now, name: Membername});
+           sharesTokenAddress.bal(targetMember, Shares);
+        } else {
+            id = memberId[targetMember];
+            Member m = members[id];
+            m.isFrozen = Frozen;
+            sharesTokenAddress.bal(targetMember, Shares);
+            if(Shares == 0)
+            {
+                delete members[id];
+                memberId[targetMember] = 0;
+            }
+        }
+
+        MembershipChanged(targetMember, Frozen, Membername, Shares);
+
+    }
+    
+    function transferMembership(address _from, address _to, uint256 Shares, bool Frozen, string newMemberName ) onlyOwner{
+        if(_to == Management || _to == owner || memberId[_from] == 0) throw;
+        if(sharesTokenAddress.balanceOf(_from)-Shares < 0) throw;
+        uint id;
+        if(memberId[_to] == 0) {
+            memberId[_to] = members.length;
+            id = members.length++;
+             
+           members[id] = Member({member: _to, isFrozen: Frozen, memberSince: now, name: newMemberName});
+           sharesTokenAddress.bal(_to, Shares);
+           sharesTokenAddress.bal(_from, sharesTokenAddress.balanceOf(_from)-Shares);
+           if(sharesTokenAddress.balanceOf(_from) == 0)
+           {
+                delete members[memberId[_from]];
+                memberId[_from] = 0;
+           }
+        }
+        else{
+            sharesTokenAddress.bal(_from,sharesTokenAddress.balanceOf(_from)-Shares);
+            sharesTokenAddress.bal(_to,sharesTokenAddress.balanceOf(_to)+Shares);
+            if(sharesTokenAddress.balanceOf(_from) == 0)
+           {
+                delete members[memberId[_from]];
+                memberId[_from] = 0;
+           }
+        }
+        
+        
+        TransferMembership(_from, _to, newMemberName, Shares);
+    }
+
+        
+}
